@@ -26,8 +26,17 @@ void add_history(char* unused){}
 
 #endif
 
+/* Forward Declaration  */
+
+struct lval;
+struct lenv;
+typedef struct lval lval;
+typedef struct lenv lenv;
+
 enum { LVAL_ERR, LVAL_NUM, LVAL_SYM, LVAL_SEXPR,LVAL_QEXPR };
 enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
+
+typedef lval*(*lbuiltin) (lenv*, lval*);
 
 typedef struct lval{
   int type;
@@ -36,6 +45,7 @@ typedef struct lval{
 
   char* err;
   char* sym;
+  lbuiltin func;
 
   int count;
   struct lval** cell;
@@ -171,6 +181,9 @@ lval* builtin_list(lval* a){
   a->type = LVAL_QEXPR;
   return a;
 }
+
+typedef lval* (*lbuiltin) (lenv*, lval*);
+
 
 lval* builtin_head(lval* a){
   LASSERT(a, (a->count == 1), "Function 'head' passed too many arguments!");
@@ -336,7 +349,7 @@ int main(int argc, char** argv){
     //symbol : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/ ; 
     "                                                    \
       number : /-?[0-9]+/ ;                              \
-      symbol : \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | '+' | '-' | '*' | '/' ; \
+      symbol : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/ ;        \ 
       sexpr  : '(' <expr>* ')' ;                         \
       qexpr  : '{' <expr>* '}' ;                         \
       expr   : <number> | <symbol> | <sexpr> | <qexpr> ; \
