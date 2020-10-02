@@ -333,9 +333,10 @@ int main(int argc, char** argv){
   mpc_parser_t* Rai     = mpc_new("rai");
   
   mpca_lang(MPCA_LANG_DEFAULT,
+    //symbol : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/ ; 
     "                                                    \
       number : /-?[0-9]+/ ;                              \
-      symbol : \"list\" | \"head\" | \"tail\" | \"join\" |                   \"eval\" | '+' | '-' | '*' | '/' ;        \
+      symbol : \"list\" | \"head\" | \"tail\" | \"join\" | \"eval\" | '+' | '-' | '*' | '/' ; \
       sexpr  : '(' <expr>* ')' ;                         \
       qexpr  : '{' <expr>* '}' ;                         \
       expr   : <number> | <symbol> | <sexpr> | <qexpr> ; \
