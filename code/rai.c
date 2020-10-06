@@ -42,24 +42,23 @@ typedef lval*(*lbuiltin) (lenv*, lval*);
 
 typedef struct lval{
   int type;
-
+  
+  // Basic
   long num;
-
   char* err;
   char* sym;
-  lbuiltin func;
 
+  // Function
+  lbuiltin builtin;
+  lenv* env;
+  lval* formals;
+  lval* body;
+
+  // Expression
   int count;
   struct lval** cell;
 
 } lval;
-
-lval* lval_func(lbuiltin func){
-  lval* v = malloc(sizeof(lval));
-  v->type = LVAL_FUNC;
-  v->func = func;
-  return v;
-}
 
 lval* lval_num(long x){
   lval* v = malloc(sizeof(lval));
@@ -96,6 +95,13 @@ lval* lval_sym(char* s){
   v->type = LVAL_SYM;
   v->sym = malloc(strlen(s) + 1);
   strcpy(v->sym, s);
+  return v;
+}
+
+lval* lval_builtin(lbuiltin func){
+  lval* v = malloc(sizeof(lval));
+  v->type = LVAL_FUNC;
+  v->builtin = func;
   return v;
 }
 
@@ -141,7 +147,7 @@ lval* lval_copy(lval* v){
 
   switch(v->type){
     // Copy Functions and Numbers Directly
-    case LVAL_FUNC: x->func = v->func; break;
+    case LVAL_FUNC: x->builtin = v->builtin; break;
     case LVAL_NUM: x->num = v->num; break;
     // Copy Strings using malloc and strcpy
     case LVAL_ERR: x->err = malloc(strlen(v->err) + 1);
@@ -449,7 +455,7 @@ lval* builtin_def(lenv* e, lval* a){
 
 void lenv_add_builtin(lenv* e, char* name, lbuiltin func){
   lval* k = lval_sym(name);
-  lval* v = lval_func(func);
+  lval* v = lval_builtin(func);
   lenv_put(e, k, v);
   lval_del(k);
   lval_del(v);
@@ -496,7 +502,7 @@ lval* lval_eval_sexpr(lenv* e, lval* v){
   }
   
   // If so, call function to get result
-  lval* result = f->func(e, v);
+  lval* result = f->builtin(e, v);
   lval_del(f);
   return result;
 }
