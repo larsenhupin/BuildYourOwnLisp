@@ -105,6 +105,24 @@ lval* lval_builtin(lbuiltin func){
   return v;
 }
 
+lenv* lenv_new(void);
+
+lval* lval_lambda(lval* formals, lval* body){
+  lval* v = malloc(sizeof(laval));
+  v->type = LVAL_FUNC;
+
+  // Set Builtin to Null
+  v->builtin = NULL;
+
+  // Built new envrionment
+  v->env = lenv_new();
+
+  // Set Formals and Body
+  v->formals = formals;
+  v->body = body;
+  return v;
+}
+
 lval* lval_sexpr(void){
   lval* v = malloc(sizeof(lval));
   v->type = LVAL_SEXPR;
@@ -122,10 +140,18 @@ lval* lval_qexpr(void){
   return v;
 }
 
+void lenv_del(lenv* e);
+
 void lval_del(lval* v){
   switch(v->type){
     case LVAL_NUM: break;
-    case LVAL_FUNC: break;
+    case LVAL_FUNC:
+      if(!v->builtin){
+        lenv_del(v->env);
+        lenv_del(v->formals);
+        lenv_del(v->body);
+      }
+    break;
     case LVAL_ERR: free (v->err); break;
     case LVAL_SYM: free (v->sym); break;
     
@@ -147,7 +173,14 @@ lval* lval_copy(lval* v){
 
   switch(v->type){
     // Copy Functions and Numbers Directly
-    case LVAL_FUNC: x->builtin = v->builtin; break;
+    case LVAL_FUNC: 
+      x->builtin = v->builtin;
+      if(x->builtin != NULL){
+        x->env = lenv_copy(v->env);
+        x->formals = lval_copy(v->formals);
+        x->body = lval_copy(v->body);
+      }
+    break;
     case LVAL_NUM: x->num = v->num; break;
     // Copy Strings using malloc and strcpy
     case LVAL_ERR: x->err = malloc(strlen(v->err) + 1);
@@ -220,7 +253,17 @@ void lval_expr_print(lval* v, char open, char close){
 void lval_print(lval* v){
   switch(v->type){
     case LVAL_NUM:    printf("%li", v->num); break;
-    case LVAL_FUNC:   printf("<function>"); break;
+    case LVAL_FUNC:
+      if(v->builtin){
+        printf("<function>"); break;
+      } else {
+        printf("(\\ ");
+        lval_print(v->formals);
+        putchar(' ');
+        lval_print(v->body);
+        putchar(')');
+      }
+      break;
     case LVAL_ERR:    printf("Error: %s", v->err); break;
     case LVAL_SYM:    printf("%s", v->sym); break;
     case LVAL_SEXPR:  lval_expr_print(v, '(', ')'); break;
@@ -327,6 +370,28 @@ void lenv_put(lenv* e, lval* k, lval* v){
     "Function '%s' passed {} for argument %i.", func, index);
 
 lval* lval_eval(lenv* e, lval* v);
+
+lval* builtin_lambda(lenv* e, lval* v){
+  // Check Two arguments, each of which are Q-Expressions
+  LASSERT_NUM("\\", a, 2);
+  LASSERT_TYPE("\\", a, 0, LVAL_QEXPR);
+  LASSERT_TYPE("\\", a, 1, LVAL_QEXPR);
+
+  // Check first Q-Expression contains only Symbols
+  for(int i = 0; i < a->cell[0]->count; i++){
+    LASSERT(a, (a->cell[0]->cell[i]->type == LVAL_SYM),
+    "Cannot define non symbole. Got %s, Expected %s.",
+    ltype_name(a->cell[0]->[i]->type), ltype_name(LVAL_SYM));
+  }
+  
+  // Pop first two arguments and pass them to lval_lambda
+  lval* formals = lval_pop(a, 0);
+  lval* body = lval_pop(a, 0);
+  lval_del(a);
+
+  return lval_lambda(formals, body);
+
+}
 
 lval* builtin_list(lenv* e, lval* a){
   a->type = LVAL_QEXPR;
