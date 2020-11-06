@@ -154,7 +154,6 @@ void lval_del(lval* v){
     break;
     case LVAL_ERR: free (v->err); break;
     case LVAL_SYM: free (v->sym); break;
-    
     case LVAL_QEXPR:
     case LVAL_SEXPR:
       for (int i = 0; i < v->count; i++){
@@ -285,6 +284,41 @@ void lval_print(lval* v){
 }
 
 void lval_println(lval* v){ lval_print(v); putchar('\n'); }
+
+int lval_eq(lval* x, lval* y){
+  // Different types are always unequal
+  if(x->type != y->type){ return 0; }
+
+  // Compare based upon type
+  switch(x->type){
+    // Compare number value
+    case LVAL_NUM: return (x->num == y->num);
+    
+    // Compare string value
+    case LVAL_ERR: return (strcmp(x->err, y->err) == 0);
+    case LVAL_SYM: return (strcmp(x->sym, y->sym) == 0);
+
+    // If builtin cmp functions, otherwise cmp formals & body
+     case LVAL_FUNC:
+      if(x->builtin){
+        return x->builtin == y->builtin;
+      } else {
+        return lval_eq(x->formals, y->formals) && lval_eq(x->body, y->body);
+      }
+    // Iflist compare every individual element
+     case LVAL_QEXPR:
+     case LVAL_SEXPR:
+      if(x->count != y->count) { return 0; }
+      for(int i = 0; i < x->count; i++){
+        // If any element not eq then whole list not eq
+        if(!lval_eq(x->cell[0], y->cell[0])) { return 0; }
+      }
+      // Otherwise lists must be equal
+      return 1;
+      break;
+  }
+  return 0;
+}
 
 char* ltype_name(int t){
   switch(t){
@@ -570,6 +604,87 @@ lval* builtin_put(lenv* e, lval* a){
   return builtin_var(e, a, "=");
 }
 
+lval* builtin_ord(lenv* e, lval* a, char* op){
+  LASSERT_NUM(op, a, 2);
+  LASSERT_TYPE(op, a, 0, LVAL_NUM);
+  LASSERT_TYPE(op, a, 1, LVAL_NUM);
+
+  int r;
+  if(strcmp(op, ">") == 0) {
+    r = (a->cell[0]->num > a->cell[1]->num); 
+  }
+  if(strcmp(op, "<") == 0) {
+    r = (a->cell[0]->num < a->cell[1]->num); 
+  }
+  if(strcmp(op, ">=") == 0) {
+    r = (a->cell[0]->num >= a->cell[1]->num); 
+  }
+  if(strcmp(op, "<=") == 0) {
+    r = (a->cell[0]->num <= a->cell[1]->num); 
+  }
+
+  lval_del(a);
+  return lval_num(r);
+}
+
+lval* builtin_gt(lenv* e, lval* a) {
+  return builtin_ord(e, a, ">");
+}
+lval* builtin_lt(lenv* e, lval* a) {
+  return builtin_ord(e, a, "<");
+}
+lval* builtin_ge(lenv* e, lval* a) {
+  return builtin_ord(e, a, ">=");
+}
+lval* builtin_le(lenv* e, lval* a) {
+  return builtin_ord(e, a, "<=");
+}
+
+lval* builtin_cmp(lenv* e, lval* a, char* op){
+  LASSERT_NUM(op, a, 2);
+  int r;
+  if(strcmp(op, "==") == 0){
+    r = lval_eq(a->cell[0], a->cell[1]);
+  }
+  if(strcmp(op, "!=") == 0){
+    r = !lval_eq(a->cell[0], a->cell[1]);
+  }
+  lval_del(a);
+  return lval_num(r);
+}
+
+lval* builtin_eq(lenv* e, lval* a){
+  return builtin_cmp(e, a, "==");
+}
+
+lval* builtin_ne(lenv* e, lval* a){
+  return builtin_cmp(e, a, "!=");
+}
+
+lval* builtin_if(lenv* e, lval* a){
+  LASSERT_NUM("if", a, 3);
+  LASSERT_TYPE("if", a, 0, LVAL_NUM);
+  LASSERT_TYPE("if", a, 1, LVAL_QEXPR);
+  LASSERT_TYPE("if", a, 2, LVAL_QEXPR);
+
+  // Mark both expression as evaluable
+  lval* x;
+  a->cell[1]->type = LVAL_SEXPR; 
+  a->cell[2]->type = LVAL_SEXPR;
+  
+  if(a->cell[0]->num){
+    // If condition is true evaluate first expression
+    x = lval_eval(e, lval_pop(a, 1));
+  } else {
+    // Otherwise evaluate second expression
+    x = lval_eval(e, lval_pop(a, 2));
+  }
+
+  // Delete argument list and return
+  lval_del(a);
+  return x;
+}
+
 void lenv_add_builtin(lenv* e, char* name, lbuiltin func){
   lval* k = lval_sym(name);
   lval* v = lval_builtin(func);
@@ -593,6 +708,15 @@ void lenv_add_builtins(lenv* e){
   lenv_add_builtin(e, "-", builtin_sub);
   lenv_add_builtin(e, "*", builtin_mul);
   lenv_add_builtin(e, "/", builtin_div);
+  // Comparison Functions
+  lenv_add_builtin(e, "if", builtin_if);
+  lenv_add_builtin(e, "==", builtin_eq);
+  lenv_add_builtin(e, "!=", builtin_ne);
+  lenv_add_builtin(e, ">", builtin_gt);
+  lenv_add_builtin(e, "<", builtin_lt);
+  lenv_add_builtin(e, ">=", builtin_ge);
+  lenv_add_builtin(e, "<=", builtin_le);
+
 }
 
 /* Evaluation */
@@ -615,6 +739,22 @@ lval* lval_call(lenv* e, lval* f, lval* a){
 
     // Pop the first symbol from the formals
     lval* sym = lval_pop(f->formals, 0);
+    
+    // Special Case to deal with '&'
+    if (strcmp(sym->sym, "&") == 0){
+      // Ensure '&' is followed by another symbol
+      if(f->formals->count != 1){
+        lval_del(a);
+        return lval_err("Function format invalid. Symbol '&' not followed by single symbole.");
+      }
+    }
+    
+    // Next formal should be bound to remaining arguments
+    lval* nsym = lval_pop(f->formals, 0);
+    lenv_put(f->env, nsym, builtin_list(e, a));
+    lval_del(sym);
+    lval_del(nsym);
+    break;
 
     // Pop the next argument from the list
     lval* val = lval_pop(a, 0);
@@ -628,6 +768,26 @@ lval* lval_call(lenv* e, lval* f, lval* a){
 
   // Argument list is now bound so can be cleaned up
   lval_del(a);
+  
+  // If '&' remains in formal list it should be bound to empty list
+  
+  if(f->formals->count > 0 && strcmp(f->formals->cell[0]->sym, "&") == 0){
+    // Check to ensure that & is not passed invalidly
+    if(f->formals->count != 2){
+      return lval_err("Function format invalid. Symbol '&' not followed by single symbol.");
+    }
+
+    // Pop and delete '&' symbol
+    lval_del(lval_pop(f->formals, 0));
+
+    // Pop next symbol and create empty list
+    lval* sym = lval_pop(f->formals, 0);
+    lval* val = lval_qexpr();
+
+    // Bindto environment and delete
+    lenv_put(f->env, sym, val);
+    lval_del(sym); lval_del(val);
+  }
 
   // If all formals have been bound evaluate
   if(f->formals->count == 0){
